@@ -1,0 +1,50 @@
+# ==========================================
+# Python Environment & Cache
+# ==========================================
+venv/
+env/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ==========================================
+# Local Data Files (raw / transformed)
+# IMPORTANT: éviter de pousser la data sur Git
+# ==========================================
+*.json
+*.csv
+*.parquet
+
+# ==========================================
+# PySpark / Hive Local Artifacts
+# ==========================================
+spark-warehouse/
+metastore_db/
+derby.log
+
+# ==========================================
+# Security / Secrets
+# ==========================================
+.env
+.env.*
+
+# ==========================================
+# IDE / Editor Settings
+# ==========================================
+.vscode/
+.idea/
+*.iml
+
+# ==========================================
+# OS Files
+# ==========================================
+.DS_Store
+Thumbs.db
+# ==========================================
+# APACHE AIRFLOW
+# ==========================================
+airflow/logs/
+airflow/airflow-webserver.pid
+airflow/airflow.db

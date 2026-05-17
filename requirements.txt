@@ -1,0 +1,22 @@
+# Scraping & Extraction
+requests
+beautifulsoup4
+feedparser
+pdfplumber
+
+# Streaming
+kafka-python
+
+# Data Processing / Lake
+pyspark
+boto3
+
+# Data Warehouse / Database
+psycopg2-binary
+SQLAlchemy
+
+# Dashboard / Data Science
+streamlit
+pandas
+plotly
+numpy

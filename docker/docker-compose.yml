@@ -1,0 +1,185 @@
+services:
+  # ----------------------------------------------------
+  # 1. ZOOKEEPER
+  # ----------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+    container_name: zookeeper-maroc
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2182:2181" # Décalé sur le port 2182 de ton PC
+    networks:
+      - data_network
+
+  # ----------------------------------------------------
+  # 2. KAFKA
+  # ----------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+    container_name: kafka-maroc
+    depends_on:
+      - zookeeper
+    ports:
+      - "9093:9092" # Décalé sur le port 9093 de ton PC
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - data_network
+
+  # ----------------------------------------------------
+  # 3. MINIO
+  # ----------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: minio-maroc
+    ports:
+      - "${MINIO_PORT:-9002}:9000"
+      - "${MINIO_CONSOLE_PORT:-9003}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin123}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-admin123}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data_maroc:/data
+    networks:
+      - data_network
+
+  # ----------------------------------------------------
+  # 4. MINIO SETUP (Configuration Automatisée & Résiliente)
+  # ----------------------------------------------------
+  minio-setup:
+    image: minio/mc
+    container_name: minio-setup-maroc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      echo '⏳ En attente du démarrage complet de MinIO...';
+      until /usr/bin/mc alias set myminio http://minio:9000 ${MINIO_ROOT_USER:-admin123} ${MINIO_ROOT_PASSWORD:-admin123}; do
+        echo '🔄 Tentative de connexion échouée, on réessaie dans 2 secondes...';
+        sleep 2;
+      done;
+      echo '✅ MinIO est prêt ! Création des buckets...';
+      /usr/bin/mc mb myminio/bronze-zone || true;
+      /usr/bin/mc mb myminio/silver-zone || true;
+      /usr/bin/mc mb myminio/gold-zone || true;
+      /usr/bin/mc anonymous set public myminio/bronze-zone || true;
+      echo '🎉 Configuration MinIO terminée avec succès !';
+      exit 0;
+      "
+    networks:
+      - data_network
+
+  # ----------------------------------------------------
+  # 5. POSTGRESQL (Data Warehouse Gold)
+  # ----------------------------------------------------
+  postgres-maroc:
+    image: postgres:15
+    container_name: postgres-maroc
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: marche_it_gold
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_maroc:/var/lib/postgresql/data
+    networks:
+      - data_network
+
+  # ====================================================
+  # 6. AIRFLOW - BASE DE DONNÉES DÉDIÉE
+  # ====================================================
+  postgres-airflow:
+    image: postgres:15
+    container_name: postgres-airflow
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data_airflow:/var/lib/postgresql/data
+    networks:
+      - data_network
+
+  # ====================================================
+  # 7. AIRFLOW - INITIALISATION
+  # ====================================================
+  airflow-init:
+    image: apache/airflow:2.8.1
+    container_name: airflow-init
+    depends_on:
+      - postgres-airflow
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: admin
+      _AIRFLOW_WWW_USER_PASSWORD: admin
+    command: version
+    networks:
+      - data_network
+
+  # ====================================================
+  # 8. AIRFLOW - WEBSERVER (Interface Graphique)
+  # ====================================================
+  airflow-webserver:
+    image: apache/airflow:2.8.1
+    container_name: airflow-webserver
+    restart: always
+    depends_on:
+      - postgres-airflow
+      - airflow-init
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins
+    command: webserver
+    networks:
+      - data_network
+
+  # ====================================================
+  # 9. AIRFLOW - SCHEDULER (Le moteur de tâches)
+  # ====================================================
+  airflow-scheduler:
+    image: apache/airflow:2.8.1
+    container_name: airflow-scheduler
+    restart: always
+    depends_on:
+      - postgres-airflow
+      - airflow-init
+    environment:
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    volumes:
+      - ../airflow/dags:/opt/airflow/dags
+      - ../airflow/logs:/opt/airflow/logs
+      - ../airflow/plugins:/opt/airflow/plugins
+    command: scheduler
+    networks:
+      - data_network
+
+networks:
+  data_network:
+    driver: bridge
+
+volumes:
+  minio_data_maroc:
+  postgres_data_maroc:
+  postgres_data_airflow: # Ajout du volume pour la BDD Airflow
